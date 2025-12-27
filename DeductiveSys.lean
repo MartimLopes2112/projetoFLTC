@@ -158,110 +158,19 @@ def swapFreeOccurences : Formula L → Term L → L.Variables → Formula L := b
                       if x = y then exact Formula.quantifier y φ
                       else exact Formula.quantifier y (swapFreeOccurences φ t x)
 
-def findTerm_inTerms : Term L → Term L → L.Variables
-            → Option (Option (Term L)) := by
-  intro u v x --want to check if u = [v]^x_t
-  letI := L.instVariables
-  letI := L.instFunctions
-  cases u with
-  | var y => cases v with
-              | var z => if ¬ y = z then exact none
-                         else if y = x
-                         then exact some (some (Term.var x))
-                         else exact some none
-              | _ => exact none
-  | @func l f us => cases v with
-              | @func l' g vs =>
-              if h : l = l' then
-                if f = h ▸ g then
-                  have combineResults : Option (Option (Term L))
-                                →  Option (Option (Term L))
-                                →  Option (Option (Term L)) := by
-                      intro t1 t2
-                      exact do
-                      let o1 ← t1
-                      let o2 ← t2
-                      match o1, o2 with
-                      | none, none => pure none
-                      | some a, none => pure (some a)
-                      | none, some b => pure (some b)
-                      | some a, some b =>
-                        if a = b then pure (some a) else failure
-
-                  let verdicts := fun i => findTerm_inTerms (us i) (vs (Fin.cast h i)) x
-                  exact (List.ofFn verdicts).foldl combineResults (some none)
-                else exact none
-              else exact none
-              | _ => exact none
-
-def findTerm : Formula L → Formula L → L.Variables
-            → Option (Option (Term L)) := by
-  -- none -> nao da
-  -- some none -> da qualquer termo
-  -- some some t -> so da com o t
-  intro ϕ ψ x --want to check if ϕ = [ψ]^x_t
-  letI := L.instVariables
-  letI := L.instRelations
-  cases ϕ with
-  | bot => cases ψ with
-            | bot => exact some none
-            | _ => exact none
-  | implies φ1 φ2 => cases ψ with
-                      | implies ψ1 ψ2 =>
-                            let t1 := findTerm φ1 ψ1 x
-                            let t2 := findTerm φ2 ψ2 x
-                            if t1 = none ∨ t2 = none then exact none
-                            else if t1 = some none then
-                              exact t2
-                            else if t2 = some none then
-                              exact t1
-                            else if t1 = t2 then
-                              exact t1
-                            else exact none
-                      | _ => exact none
-  | @atomic l p ts =>
-    cases ψ with
-    | @atomic l' p' ts' => if h : l = l' then
-              if p = h ▸ p' then
-              have combineResults : Option (Option (Term L))
-                            →  Option (Option (Term L))
-                            →  Option (Option (Term L)) := by
-                            intro t1 t2
-                            exact do
-                            let o1 ← t1
-                            let o2 ← t2
-                            match o1, o2 with
-                            | none, none => pure none
-                            | some a, none => pure (some a)
-                            | none, some b => pure (some b)
-                            | some a, some b =>
-                              if a = b then pure (some a) else failure
-
-              let verdicts := fun i => findTerm_inTerms (ts i) (ts' (Fin.cast h i)) x
-              exact (List.ofFn verdicts).foldl combineResults (some none)
-              else exact none
-              else exact none
-    | _ => exact none
-  | quantifier y φ => cases ψ with
-                      | quantifier z ψ' =>
-                          if y = z then
-                          if ¬ x = y then exact (findTerm φ ψ' x)
-                          else exact (if φ = ψ' then some none else none)
-                          else exact none
-                      | _ => exact none
-
 def Syllogism (L : Language) : Type := List (Formula L) × List (Formula L)
 
 def isAxiom : Syllogism L  → Prop := by
   intro sil
-  exact ¬ sil.fst ∩ sil.snd = []
+  exact ¬ sil.fst.bagInter sil.snd = []
 
 instance isAxiomDecidable : (sil : Syllogism L) → Decidable (isAxiom sil) := by
   intro sil
   unfold isAxiom
   infer_instance
 
-def isLeftBot : Syllogism L → Prop := fun sil => Formula.bot ∈ sil.fst
+def isLeftBot : Syllogism L → Prop :=
+  fun sil => Formula.bot ∈ sil.fst
 
 instance isLeftBotDecidable : (sil : Syllogism L) → Decidable (isLeftBot sil) := by
   intro sil
@@ -279,21 +188,19 @@ def subtractLists [DecidableEq α] (A B : List α) : List α := by
     | cons b bs => exact subtractLists (A.erase b) bs
 
 def isLeftImplication : Syllogism L → Syllogism L → Syllogism L → Prop := by
-  intro hyp1 hyp2 sil
-  let Γ := hyp1.fst
-  let Δ := hyp2.snd
-  --Δ e Γ estao presentes nos antecedentes e consequentes das hipoteses e da conclusao
-  if Δ.isPerm sil.snd ∧ (Δ ∩ hyp1.snd).isPerm Δ
-      ∧ (Γ ∩ sil.fst).isPerm Γ ∧ (Γ ∩ hyp2.fst).isPerm Γ then
-    --Os antecedentes tem formulas ϕ e φ
-    if h : (subtractLists hyp1.snd Δ).length = 1 ∧
-              (subtractLists hyp2.fst Γ).length = 1 then
-      let ϕ := (extractElement (subtractLists hyp1.snd Δ) h.left).fst
-      let ψ := (extractElement (subtractLists hyp2.fst Γ) h.right).fst
-      let hϕ := (extractElement (subtractLists hyp1.snd Δ) h.left).snd
-      let hψ := (extractElement (subtractLists hyp2.fst Γ) h.right).snd
+  intro hypLeft hypRight sil
+  let Γ := hypLeft.fst
+  let Δ := hypRight.snd
+  --Show that the structure of the inference rule is being respected
+  if Δ.isPerm sil.snd ∧ (Δ.bagInter hypLeft.snd).isPerm Δ
+      ∧ (Γ.bagInter sil.fst).isPerm Γ ∧ (Γ.bagInter hypRight.fst).isPerm Γ then
+    if h : (subtractLists hypLeft.snd Δ).length = 1 ∧
+              (subtractLists hypRight.fst Γ).length = 1 then
+      --Define ϕ and ψ
+      let ϕ := (extractElement (subtractLists hypLeft.snd Δ) h.left).fst
+      let ψ := (extractElement (subtractLists hypRight.fst Γ) h.right).fst
 
-      if hyp1.snd.isPerm (ϕ :: Δ) ∧ hyp2.fst.isPerm (ψ :: Γ)
+      if hypLeft.snd.isPerm (ϕ :: Δ) ∧ hypRight.fst.isPerm (ψ :: Γ)
             ∧ sil.fst.isPerm (Formula.implies ϕ ψ :: Γ) then
             exact True
       else exact False
@@ -308,10 +215,11 @@ instance isLeftImplicationDecidable : (hyp1 hyp2 sil : Syllogism L)
 
 def isRightImplication : Syllogism L → Syllogism L → Prop := by
   intro hyp sil
+  --define Γ, Δ, ϕ, ψ and let γ be the aditional formula in sil.snd
   let Γ := sil.fst
-  if h1 : Γ ∩ hyp.fst = Γ ∧ (subtractLists hyp.fst Γ).length = 1 then
+  if h1 : Γ.bagInter hyp.fst = Γ ∧ (subtractLists hyp.fst Γ).length = 1 then
       let ϕ := (extractElement (subtractLists hyp.fst Γ) h1.right).fst
-      let Δ := hyp.snd ∩ sil.snd
+      let Δ := hyp.snd.bagInter sil.snd
 
       if h2 : ((Δ.bagInter hyp.snd).isPerm Δ ∧ (Δ.bagInter sil.snd).isPerm Δ)
                 ∧ (subtractLists hyp.snd Δ).length = 1
@@ -319,7 +227,7 @@ def isRightImplication : Syllogism L → Syllogism L → Prop := by
 
         let ψ := (extractElement (subtractLists hyp.snd Δ) h2.right.left).fst
         let γ := (extractElement (subtractLists sil.snd Δ) h2.right.right).fst
-
+        --If γ = ϕ ⊇ ψ then its the inference rule
         if γ = Formula.implies ϕ ψ then exact True else exact False
       else exact False
   else exact False
@@ -333,10 +241,12 @@ instance isRightImplicationDecidable : (hyp sil : Syllogism L)
 def isLeftQuantification : Syllogism L → Syllogism L →
             (t : Term L) → (x : L.Variables) → (ϕ : Formula L) → Prop := by
   intro hyp sil t x ϕ
+  --Check the structure
   if h : hyp.snd.isPerm sil.snd ∧ (sil.fst.bagInter hyp.fst).isPerm sil.fst
      ∧ (subtractLists hyp.fst sil.fst).length = 1 ∧ Formula.quantifier x ϕ ∈ sil.fst
   then let ⟨ψ, hψ⟩ := extractElement (subtractLists hyp.fst sil.fst) h.right.right.left
-       exact ψ = swapFreeOccurences ϕ t x
+       --if the strucutre is correct, just need to see that ψ = [ϕ]^x_t and t ▸ x : ϕ
+       exact ψ = swapFreeOccurences ϕ t x ∧ freeForVarInFormula t x ϕ
   else exact False
 
 instance isLeftQuantificationDecidable : (hyp sil : Syllogism L) →
@@ -349,12 +259,15 @@ instance isLeftQuantificationDecidable : (hyp sil : Syllogism L) →
 def isRightQuantification : Syllogism L → Syllogism L →
     L.Variables → L.Variables → Formula L →  Prop := by
   intro hyp sil x y ϕ
+  --check the structure of the rule
   let Γ := sil.fst
   let Δ := sil.snd.bagInter hyp.snd
   if subtractLists sil.snd Δ = [Formula.quantifier x ϕ] ∧
       subtractLists hyp.snd Δ = [swapFreeOccurences ϕ (Term.var y) x]  ∧
         hyp.fst.isPerm Γ
-  then exact ∀ φ : Formula L, φ ∈ (Γ ++ Δ ++ [Formula.quantifier x ϕ]) → y ∉ fv φ
+  then --if the structure is right, it suffices to see that y doesnt appear
+       --free elsewhere in the rule
+    exact ∀ φ : Formula L, φ ∈ (Γ ++ Δ ++ [Formula.quantifier x ϕ]) → y ∉ fv φ
   else exact False
 
 instance isRightQuantificationDecidable : (hyp sil : Syllogism L ) →
@@ -416,10 +329,6 @@ def x : Term Sigma_S := Term.var "x"
 
 def y : Term Sigma_S := Term.var "y"
 
--- Abbreviations for terms
-def S1 : Formula Sigma_S :=
-  Formula.quantifier "x" (Formula.implies (eqS (S x) zero) Formula.bot)
-
 def S2 : Formula Sigma_S :=
   Formula.quantifier "x" (Formula.quantifier "y" (
     Formula.implies (eqS (S x) (S y)) (eqS x y)
@@ -434,6 +343,8 @@ def ψ : Formula Sigma_S :=
   Formula.quantifier "y" (Formula.implies
   (eqS (S x) (S y))
   (eqS x y))
+
+--example 2.7
 
 def sil12 : Syllogism Sigma_S :=
   ⟨ [ψ, ϕ, S2,
@@ -575,3 +486,7 @@ by
     TreeProof.r_quant sil1 h2 "x" "x"
       (Formula.quantifier "y" (Formula.implies (eqS (S (S x)) (S (S y))) (eqS x y)))
         (by decide)
+
+--example 1.48
+#eval (freeForVarInFormula (S zero) "x" (Formula.quantifier "y" (eqS (S x) (S y))))
+#eval (freeForVarInFormula (S y) "x" (Formula.quantifier "y" (eqS (S x) (S y))))
