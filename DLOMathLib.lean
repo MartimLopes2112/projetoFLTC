@@ -108,6 +108,15 @@ lemma realize_xi_lt_atZ
     · intro h
       trivial
 
+def ltM [inst : Sigma_DLO.Structure M] : M → M → Prop := by
+  intro m1 m2
+  have p : Sigma_DLO.Relations 2 := by exact ()
+  have ts : (i : Fin 2) →  M := fun i =>
+    match i with
+    | 0 => m1
+    | 1 => m2
+  exact inst.RelMap p ts
+
 instance proof_Q_is_DLO_model : Ax_DLO.Model Rat where
   realize_of_mem := by
     letI := Rat.instPartialOrder
@@ -120,8 +129,8 @@ instance proof_Q_is_DLO_model : Ax_DLO.Model Rat where
       intro q1 q2 h1
       rw [FirstOrder.Language.BoundedFormula.realize_not]
       intro h2
-      simp at h2
-      simp at h1
+      simp only [realize_xi_lt_atQ] at h2
+      simp only [realize_xi_lt_atQ] at h1
       have h1' : q1 < q2 := by simpa using h1
       have h2' : q2 < q1 := by simpa using h2
       exact lt_asymm (a := q2) (b := q1) h2' h1'
@@ -184,3 +193,86 @@ theorem Z_doesnt_model_DLO : ¬ Ax_DLO.Model ℤ := by
     let x_pos' : 0 < x := by simpa using x_pos
     let x_lt_one' : x < 1 := by simpa using x_lt_one
     linarith
+
+-----------Entailment Proof----------------
+
+@[simp]
+lemma realize_xi_lt_atM [inst : Sigma_DLO.Structure M]
+  {n : ℕ} {i j : Fin n} {v : Fin n → M} :
+  (xi_lessthan_xj n i j).Realize ρ v ↔ ltM (v i) (v j) := by
+    apply Iff.intro
+    · intro h
+      unfold xi_lessthan_xj at h
+      simp at h
+      unfold ltM
+      simp
+      unfold FirstOrder.Language.BoundedFormula.Realize at h
+      simp at h
+      -- magia negra daqui para baixo
+      have h_eq : (fun i_1 => FirstOrder.Language.Term.realize (L := Sigma_DLO) (Sum.elim ρ v)
+          (match (i_1 : Fin 2) with
+          | 0 => FirstOrder.Language.var (Sum.inr i)
+          | 1 => FirstOrder.Language.var (Sum.inr j))) =
+          (fun i_1 => match i_1 with | 0 => v i | 1 => v j) := by
+        ext x
+        fin_cases x <;> simp [FirstOrder.Language.Term.realize]
+      rw [h_eq] at h
+      exact h
+    · intro h
+      unfold xi_lessthan_xj
+      unfold ltM at h
+      simp
+      simp at h
+      rw [FirstOrder.Language.BoundedFormula.Realize]
+      have h_eq : (fun i_1 => FirstOrder.Language.Term.realize (L := Sigma_DLO) (Sum.elim ρ v)
+          (match (i_1 : Fin 2) with
+          | 0 => FirstOrder.Language.var (Sum.inr i)
+          | 1 => FirstOrder.Language.var (Sum.inr j))) =
+          (fun i_1 => match i_1 with | 0 => v i | 1 => v j) := by
+        ext x
+        fin_cases x <;> simp [FirstOrder.Language.Term.realize]
+      rw[h_eq]
+      exact h
+
+
+def exists_triple : Sigma_DLO.Sentence :=
+  let x0lx1 := xi_lessthan_xj 3 0 1
+  let x1lx2 := xi_lessthan_xj 3 1 2
+
+  (x0lx1.imp x1lx2.not).alls.not
+
+theorem DLO_implies_exists_triple [inst : Sigma_DLO.Structure M] {m : M} :
+    Ax_DLO.Model M → exists_triple.Realize M := by
+  simp
+  unfold exists_triple
+  simp
+  intro h1 h2
+  have h_smaller : ∃ x0 , ltM x0 m := by
+    have DLO5M : M ⊨ DLO5 := h1 DLO5 (by unfold Ax_DLO; simp)
+    unfold DLO5 at DLO5M
+    simp at DLO5M
+    have means := DLO5M m
+    simp at means
+    trivial
+  have h_bigger : ∃ x0 , ltM m x0 := by
+    have DLO6M : M ⊨ DLO6 := h1 DLO6 (by unfold Ax_DLO; simp)
+    unfold DLO6 at DLO6M
+    simp at DLO6M
+    have means := DLO6M m
+    simp at means
+    trivial
+  let m0 := h_smaller.choose
+  let m2 := h_bigger.choose
+  have h3 := h2 m0 m m2
+  simp at h3
+  exact h3
+    (by
+    have m0lm : ltM m0 m := by
+      unfold m0
+      exact h_smaller.choose_spec
+    exact m0lm)
+    (by
+    have mlm2 : ltM m m2 := by
+      unfold m2
+      exact h_bigger.choose_spec
+    exact mlm2)
